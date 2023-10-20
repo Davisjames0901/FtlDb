@@ -38,7 +38,7 @@ public class Int32Unique : IIndexer
         var from = BitConverter.ToInt64(span.Slice(0, 8));
         var to = BitConverter.ToInt32(span.Slice(8, 8));
         return (from, to);
-    }ga
+    }
 
     public object NextKey()
     {
