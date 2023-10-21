@@ -59,7 +59,7 @@ public class DataController : Controller
         return Ok(write);
     }
     
-    [HttpPost("{schema}/{table}")]
+    [HttpPost("{schema}/{table}/match")]
     public IActionResult ReadRowByPrimaryKey(string table, string schema, [FromBody]JsonObject payload)
     {
         if (!_tableService.Exists(table, schema))
@@ -68,17 +68,22 @@ public class DataController : Controller
         var mount = _dataService.TryMount(table, schema);
         if (mount == null)
             return StatusCode(500, "Failed to mount table");
-        
-        if (!payload.TryGetPropertyValue("key", out var keyJson))
-            return BadRequest("Could not find key property");
-        
-        var keyType = mount.GetIndexType(null);
 
-        var key = keyJson.Deserialize(keyType);
-        if (key == null)
-            return BadRequest($"Could not parse key as {keyType}");
+        var query = payload.ToList();
+        if (query.Count == 0 || query.Count > 1)
+            return BadRequest("One parameter is needed");
+
+        var keyValue = query.First();
+        var keyType = mount.GetIndexType(keyValue.Key);
+
+        if (keyType == null)
+            return BadRequest($"Index with name {keyValue.Key} does not exist");
         
-        var read = mount.ReadByPrimaryKey(key);
+        var key = keyValue.Value.Deserialize(keyType);
+        if (key == null)
+            return BadRequest($"Could not parse {keyValue.Key} as {keyType}");
+        
+        var read = mount.ReadFirstByIndex(keyValue.Key, key);
         if (read == null)
             return NotFound();
         return Ok(read);

@@ -2,9 +2,8 @@ namespace AsperandLabs.FtlDb.Engine.Indexers;
 
 public interface IIndexer: IDisposable
 {
-    (long from, long to)? GetIndex(object key);
-    object NextKey();
-    bool WriteKey(object key, long from, long to);
+    bool TryMatch(object key, out (long start, int length)[] result);
+    bool WriteKey(object key, long start, int length);
     int Count();
     Type GetKeyType();
 }

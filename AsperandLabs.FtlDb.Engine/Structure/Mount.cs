@@ -1,7 +1,9 @@
+using System.Buffers;
 using System.Reflection;
 using AsperandLabs.FtlDb.Engine.Config;
 using AsperandLabs.FtlDb.Engine.Indexers;
 using AsperandLabs.FtlDb.Engine.Services;
+using AsperandLabs.FtlDb.Engine.Structure;
 using MessagePack;
 
 namespace AsperandLabs.FtlDb.Engine.Row;
@@ -13,50 +15,66 @@ public class Mount : IDisposable
     private IndexerFactory _indexFactory;
     private Type _rowClass;
     private FileStream _dataFile;
-    private IIndexer _primaryKey;
+    private Dictionary<string, IIndexer> _indices;
+    private (ColumnSpec Column, IPrimaryIndexer Indexer) _primaryIndex;
+    public TableSpec TableSpec { get; private set; }
 
     public Mount(TableConfig config, TableService tableService, IndexerFactory indexFactory)
     {
         _config = config;
         _tableService = tableService;
         _indexFactory = indexFactory;
+        _indices = new Dictionary<string, IIndexer>();
     }
 
-    public object? ReadByPrimaryKey(object key)
+    public object[] ReadFirstByIndex(string indexName, object indexKey)
     {
-        var index = _primaryKey.GetIndex(key);
-        if (index == null)
-            return null;
+        if (!_indices.TryGetValue(indexName, out var index))
+            return Array.Empty<object>();
 
-        var size = (int)(index.Value.to - index.Value.from);
-        var buffer = new byte[size];
-        _dataFile.Seek((int)index.Value.from, SeekOrigin.Begin);
-        var read = _dataFile.Read(buffer, 0, size);
-        if (read != size)
-            return null;
+        if (!index.TryMatch(indexKey, out var results))
+            return Array.Empty<object>();
 
-        return MessagePackSerializer.Deserialize(_rowClass, buffer);
+        var rows = new object[results.Length];
+        for (var i = 0; i < results.Length; i++)
+        {
+            
+            var buffer = new byte[results[i].length];
+            _dataFile.Seek((int)results[i].start, SeekOrigin.Begin);
+            var read = _dataFile.ReadAsync(buffer, 0, results[i].length);
+
+            rows[i] = MessagePackSerializer.Deserialize(_rowClass, buffer);
+        }
+
+        return rows;
     }
     
     
     public object? WriteRow(object row)
     {
+        var rowAccessor = (IRow)row;
+        //Get next available Id and set it on the class before serializing
+        var id = _primaryIndex.Indexer.NextKey();
+        rowAccessor.SetProp(_primaryIndex.Column.ColumnName, id);
+        
         var bytes = MessagePackSerializer.Serialize(_rowClass, row);
-        var id = _primaryKey.NextKey();
         _dataFile.Seek(0, SeekOrigin.End);
-        var from = _dataFile.Position;
-        var to = from + bytes.Length;
+        var start = _dataFile.Position;
 
-        if (!_primaryKey.WriteKey(id, from, to))
+        //TODO: we need to read all indexed values from the row accessor
+        //write and write the index files.
+        if (!_primaryIndex.Indexer.WriteKey(id, start, bytes.Length))
             return null;
+        
         _dataFile.Write(bytes);
+        _dataFile.WriteByte(0x0);
         _dataFile.Flush();
         return id;
     }
 
     public int Count()
     {
-        return _primaryKey.Count();
+        return _primaryIndex.Indexer.Count();
     }
 
     public Type RowType()
@@ -64,10 +82,11 @@ public class Mount : IDisposable
         return _rowClass;
     }
 
-    public Type GetIndexType(ColumnSpec columnSpec)
+    public Type? GetIndexType(string columnName)
     {
-        //Only primary key for now
-        return _primaryKey.GetKeyType();
+        if (!_indices.TryGetValue(columnName, out var indexer))
+            return null;
+        return indexer.GetKeyType();
     }
     
     public bool Init(string table, string schema)
@@ -75,9 +94,31 @@ public class Mount : IDisposable
         var tableSpec = _tableService.GetTableSpec(table, schema);
         if (tableSpec == null)
             return false;
-        
-        var primaryColumn = tableSpec.Columns.Single(x => x.ColumnType == IndexType.PrimaryKey);
-        _primaryKey = _indexFactory.GetIndexer(primaryColumn, _config.TableDir(table, schema));
+
+        TableSpec = tableSpec;
+        var tableDir = _config.TableDir(table, schema);
+        foreach (var column in tableSpec.Columns)
+        {
+            //If there is no index, then there is no indexer to get
+            if(column.ColumnType == IndexType.None)
+                continue;
+            
+            if (column.ColumnType == IndexType.PrimaryKey)
+            {
+                var primaryIndex = _indexFactory.GetPrimaryIndexer(column, tableDir);
+                _primaryIndex.Indexer = primaryIndex;
+                _primaryIndex.Column = column;
+                _indices.Add(column.ColumnName, primaryIndex);
+            }
+            else
+            {
+                var index = _indexFactory.GetIndexer(column, tableDir);
+                _indices.Add(column.ColumnName, index);
+            }
+        }
+
+        if (_primaryIndex.Indexer == null)
+            return false;
 
         var dataPath = _config.TableDataFile(table, schema);
         if (!Path.Exists(dataPath))
@@ -102,7 +143,10 @@ public class Mount : IDisposable
 
     public void Dispose()
     {
-        _primaryKey.Dispose();
+        foreach (var index in _indices)
+        {
+            index.Value.Dispose();
+        }
         _dataFile.Dispose();
     }
 }

@@ -1,5 +1,6 @@
 using System.Text;
 using AsperandLabs.FtlDb.Engine.Row;
+using AsperandLabs.FtlDb.Engine.Structure;
 using MessagePack;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -16,7 +17,10 @@ public class RowClassGenerator
         sb.Append(CSharpSnips.RowClassHeader(spec.Schema, spec.Name));
 
         var columnBody = string.Join("\n", spec.Columns.Select((x, i) => CSharpSnips.RowClassProperty(i, x.ColumnName, Type.GetType(x.ColumnValueType))));
-        sb.Append(columnBody);
+        sb.AppendLine(columnBody);
+
+        sb.AppendLine(CSharpSnips.GetPropertyAccessor(spec.Columns));
+        sb.Append(CSharpSnips.GetPropertySetter(spec.Columns));
 
         sb.Append(CSharpSnips.ClassFooter);
         return sb.ToString();
@@ -54,6 +58,7 @@ public class RowClassGenerator
         var references = new List<MetadataReference>();
 
         references.Add(GetReference(typeof(string).Assembly.Location));
+        references.Add(GetReference(typeof(IRow).Assembly.Location));
         references.Add(GetReference(typeof(MessagePackObjectAttribute).Assembly.Location));
 
         references.Add(GetReference("System.Private.CoreLib.dll"));
