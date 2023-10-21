@@ -60,7 +60,7 @@ public class DataController : Controller
     }
     
     [HttpPost("{schema}/{table}/match")]
-    public IActionResult ReadRowByPrimaryKey(string table, string schema, [FromBody]JsonObject payload)
+    public IActionResult ReadRowByKey(string table, string schema, [FromBody]JsonObject payload)
     {
         if (!_tableService.Exists(table, schema))
             return NotFound("Table does not exist");

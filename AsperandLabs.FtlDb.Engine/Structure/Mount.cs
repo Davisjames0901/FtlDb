@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Reflection;
 using AsperandLabs.FtlDb.Engine.Config;
 using AsperandLabs.FtlDb.Engine.Indexers;
@@ -29,6 +28,13 @@ public class Mount : IDisposable
 
     public object[] ReadFirstByIndex(string indexName, object indexKey)
     {
+        if (_primaryIndex.Column.ColumnName == indexName)
+        {
+            if (_primaryIndex.Indexer.TryMatch(indexKey, out var result))
+                return new[] { ReadRow(result.start, result.length) };
+            return Array.Empty<object>();
+        }
+
         if (!_indices.TryGetValue(indexName, out var index))
             return Array.Empty<object>();
 
@@ -38,33 +44,43 @@ public class Mount : IDisposable
         var rows = new object[results.Length];
         for (var i = 0; i < results.Length; i++)
         {
-            
-            var buffer = new byte[results[i].length];
-            _dataFile.Seek((int)results[i].start, SeekOrigin.Begin);
-            var read = _dataFile.ReadAsync(buffer, 0, results[i].length);
-
-            rows[i] = MessagePackSerializer.Deserialize(_rowClass, buffer);
+            if (_primaryIndex.Indexer.TryMatchSequence(results[i], out var location))
+                rows[i] = ReadRow(location.start, location.length);
         }
 
         return rows;
     }
-    
-    
+
+    private object ReadRow(long start, int length)
+    {
+        var buffer = new byte[length];
+        _dataFile.Seek((int)start, SeekOrigin.Begin);
+        var read = _dataFile.Read(buffer, 0, length);
+
+        return MessagePackSerializer.Deserialize(_rowClass, buffer);
+    }
+
+
     public object? WriteRow(object row)
     {
         var rowAccessor = (IRow)row;
         //Get next available Id and set it on the class before serializing
         var id = _primaryIndex.Indexer.NextKey();
         rowAccessor.SetProp(_primaryIndex.Column.ColumnName, id);
-        
+
         var bytes = MessagePackSerializer.Serialize(_rowClass, row);
         _dataFile.Seek(0, SeekOrigin.End);
         var start = _dataFile.Position;
 
-        //TODO: we need to read all indexed values from the row accessor
-        //write and write the index files.
         if (!_primaryIndex.Indexer.WriteKey(id, start, bytes.Length))
             return null;
+
+        var primarySequence = _primaryIndex.Indexer.GetKeySequence(id);
+        foreach (var index in _indices)
+        {
+            if(rowAccessor.GetProp(index.Key, out var columnValue))
+                index.Value.WriteKey(columnValue, primarySequence);
+        }
         
         _dataFile.Write(bytes);
         _dataFile.WriteByte(0x0);
@@ -84,11 +100,14 @@ public class Mount : IDisposable
 
     public Type? GetIndexType(string columnName)
     {
+        if (_primaryIndex.Column.ColumnName == columnName)
+            return _primaryIndex.Indexer.GetKeyType();
+        
         if (!_indices.TryGetValue(columnName, out var indexer))
             return null;
         return indexer.GetKeyType();
     }
-    
+
     public bool Init(string table, string schema)
     {
         var tableSpec = _tableService.GetTableSpec(table, schema);
@@ -100,15 +119,14 @@ public class Mount : IDisposable
         foreach (var column in tableSpec.Columns)
         {
             //If there is no index, then there is no indexer to get
-            if(column.ColumnType == IndexType.None)
+            if (column.ColumnType == IndexType.None)
                 continue;
-            
+
             if (column.ColumnType == IndexType.PrimaryKey)
             {
                 var primaryIndex = _indexFactory.GetPrimaryIndexer(column, tableDir);
                 _primaryIndex.Indexer = primaryIndex;
                 _primaryIndex.Column = column;
-                _indices.Add(column.ColumnName, primaryIndex);
             }
             else
             {
@@ -137,7 +155,7 @@ public class Mount : IDisposable
             return false;
 
         _rowClass = rowClass;
-        
+
         return true;
     }
 
@@ -147,6 +165,7 @@ public class Mount : IDisposable
         {
             index.Value.Dispose();
         }
+
         _dataFile.Dispose();
     }
 }

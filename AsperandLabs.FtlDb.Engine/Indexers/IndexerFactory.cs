@@ -17,8 +17,6 @@ public class IndexerFactory
     public IIndexer GetIndexer(ColumnSpec spec, string tableDir)
     {
         //Look for normal indexers
-        
-        //If there are no normal indexers, we can use a primary indexer
-        return GetPrimaryIndexer(spec, tableDir);
+        return null;
     }
 }
