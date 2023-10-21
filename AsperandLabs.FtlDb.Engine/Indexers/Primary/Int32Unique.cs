@@ -41,7 +41,7 @@ public class Int32Unique : IPrimaryIndexer
 
     public object NextKey()
     {
-        return _keyFile.Length / RowWidth;
+        return (int)(_keyFile.Length / RowWidth);
     }
 
     public int GetKeySequence(object key)

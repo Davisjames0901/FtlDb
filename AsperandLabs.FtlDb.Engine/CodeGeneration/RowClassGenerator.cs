@@ -4,6 +4,7 @@ using AsperandLabs.FtlDb.Engine.Structure;
 using MessagePack;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace AsperandLabs.FtlDb.Engine.CodeGeneration;
 

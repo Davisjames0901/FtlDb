@@ -16,7 +16,10 @@ public class IndexerFactory
     
     public IIndexer GetIndexer(ColumnSpec spec, string tableDir)
     {
-        //Look for normal indexers
-        return null;
+        //We need some indexers...
+        return spec.ColumnValueType switch
+        {
+            _ => throw new NotImplementedException($"Index type {spec.ColumnType}:{spec.ColumnValueType} is not supported")
+        };
     }
 }
