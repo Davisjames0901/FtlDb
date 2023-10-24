@@ -130,7 +130,7 @@ public class Mount : IDisposable
             }
             else
             {
-                var index = _indexFactory.GetIndexer(column, tableDir);
+                var index = _indexFactory.GetCompositeIndexer(column, tableDir);
                 _indices.Add(column.ColumnName, index);
             }
         }
